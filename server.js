@@ -42,6 +42,11 @@ function validateServiceAccountStructure(serviceAccount) {
     return hasAllFields && isValidType && hasValidEmail && hasValidPrivateKey;
 }
 
+// Root route to avoid 'Cannot GET /' error
+app.get('/', (req, res) => {
+    res.send('Hello, this is your server!');
+});
+
 app.post('/validate-service-account', upload.single('serviceAccount'), async (req, res) => {
     try {
         if (!req.file) {
