@@ -7,7 +7,7 @@ const app = express();
 const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
-app.use(express.static('public'));
+app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 
 let db = null;
@@ -41,11 +41,6 @@ function validateServiceAccountStructure(serviceAccount) {
 
     return hasAllFields && isValidType && hasValidEmail && hasValidPrivateKey;
 }
-
-// Root route to avoid 'Cannot GET /' error
-app.get('/', (req, res) => {
-    res.send('Hello, this is your server!');
-});
 
 app.post('/validate-service-account', upload.single('serviceAccount'), async (req, res) => {
     try {
