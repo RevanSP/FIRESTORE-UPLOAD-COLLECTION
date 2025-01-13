@@ -5,15 +5,14 @@ const path = require('path');
 
 const app = express();
 
-const MAX_FILE_SIZE = 50 * 1024 * 1024; 
+const MAX_FILE_SIZE = 50 * 1024 * 1024;
 const storage = multer.memoryStorage();
-const upload = multer({ 
+const upload = multer({
     storage: storage,
-    limits: { fileSize: MAX_FILE_SIZE } 
+    limits: { fileSize: MAX_FILE_SIZE }
 });
 
 app.use(express.static(path.join(__dirname, 'public')));
-
 app.use(express.json({ limit: '50mb' }));
 
 let db = null;
@@ -21,16 +20,9 @@ let isValidServiceAccount = false;
 
 function validateServiceAccountStructure(serviceAccount) {
     const requiredFields = [
-        'type',
-        'project_id',
-        'private_key_id',
-        'private_key',
-        'client_email',
-        'client_id',
-        'auth_uri',
-        'token_uri',
-        'auth_provider_x509_cert_url',
-        'client_x509_cert_url'
+        'type', 'project_id', 'private_key_id', 'private_key',
+        'client_email', 'client_id', 'auth_uri', 'token_uri',
+        'auth_provider_x509_cert_url', 'client_x509_cert_url'
     ];
 
     const hasAllFields = requiredFields.every(field =>
@@ -46,6 +38,22 @@ function validateServiceAccountStructure(serviceAccount) {
         serviceAccount.private_key.includes('END PRIVATE KEY');
 
     return hasAllFields && isValidType && hasValidEmail && hasValidPrivateKey;
+}
+
+async function commitBatchWithRetry(batch, collectionName, retries = 3) {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+        try {
+            await batch.commit();
+            return true;
+        } catch (error) {
+            console.log(`Batch commit attempt ${attempt} failed for ${collectionName}:`, error.message);
+            if (attempt === retries) {
+                throw error;
+            }
+            await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000));
+        }
+    }
+    return false;
 }
 
 app.post('/validate-service-account', upload.single('serviceAccount'), async (req, res) => {
@@ -112,11 +120,8 @@ app.post('/upload-collection', upload.array('collections'), async (req, res) => 
             error: 'Valid service account required'
         });
     }
-    try {
-        if (!db) {
-            return res.status(400).json({ error: 'Firebase not initialized' });
-        }
 
+    try {
         if (!req.files || req.files.length === 0) {
             return res.status(400).json({ error: 'No files uploaded' });
         }
@@ -151,9 +156,10 @@ app.post('/upload-collection', upload.array('collections'), async (req, res) => 
                     throw new Error('Invalid JSON structure. Must be an object or array');
                 }
 
-                const batchSize = 500;
+                const batchSize = 250;
                 let batchCount = 0;
                 let batch = db.batch();
+                let successCount = 0;
 
                 for (let i = 0; i < documents.length; i++) {
                     const doc = documents[i];
@@ -168,8 +174,17 @@ app.post('/upload-collection', upload.array('collections'), async (req, res) => 
                     batchCount++;
 
                     if (batchCount === batchSize || i === documents.length - 1) {
-                        console.log(`Committing batch for ${collectionName}: ${batchCount} documents`);
-                        await batch.commit();
+                        if (batchCount > 0) {
+                            console.log(`Committing batch for ${collectionName}: ${batchCount} documents`);
+                            try {
+                                await commitBatchWithRetry(batch, collectionName);
+                                successCount += batchCount;
+                                await new Promise(resolve => setTimeout(resolve, 1000));
+                            } catch (batchError) {
+                                console.error(`Batch commit failed for ${collectionName}:`, batchError);
+                                throw batchError;
+                            }
+                        }
                         batch = db.batch();
                         batchCount = 0;
                     }
@@ -177,7 +192,8 @@ app.post('/upload-collection', upload.array('collections'), async (req, res) => 
 
                 results.push({
                     collection: collectionName,
-                    documentsUploaded: documents.length
+                    documentsUploaded: successCount,
+                    totalDocuments: documents.length
                 });
 
                 console.log('Successfully processed:', collectionName);
