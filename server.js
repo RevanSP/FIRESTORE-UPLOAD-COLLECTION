@@ -4,11 +4,17 @@ const multer = require('multer');
 const path = require('path');
 
 const app = express();
+
+const MAX_FILE_SIZE = 50 * 1024 * 1024; 
 const storage = multer.memoryStorage();
-const upload = multer({ storage: storage });
+const upload = multer({ 
+    storage: storage,
+    limits: { fileSize: MAX_FILE_SIZE } 
+});
 
 app.use(express.static(path.join(__dirname, 'public')));
-app.use(express.json());
+
+app.use(express.json({ limit: '50mb' }));
 
 let db = null;
 let isValidServiceAccount = false;
